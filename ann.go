@@ -188,9 +188,12 @@ func threadIter(x []float64, y []float64, weights [][][]float64, gradient [][][]
 }
 
 // constantes d'entrainement
-var ITERS = 300
+var ITERS = 1500
 var LEARN_RATE = 0.1
 var BATCH_SIZE = 10
+var TRAIN_RATIO = 0.8
+var TARGET_LOSS = 0.08
+var TARGET_ACCURACY = 0.95
 
 var b1 = 0.9
 var b2 = 0.999
@@ -205,7 +208,8 @@ func trainAnn(inputSize int, layers []Layer, x [][]float64, y [][]float64) ANN {
 
 	updates := 0
 
-	batch_count := len(x) / BATCH_SIZE
+	batch_count := int(float64(len(x)) * TRAIN_RATIO) / BATCH_SIZE
+	createdNet := ANN{inputSize: inputSize, weights: weights, layers: layers}
 	
 	for it:=0; it<ITERS; it++ {
 		loss = 0.0
@@ -236,10 +240,29 @@ func trainAnn(inputSize int, layers []Layer, x [][]float64, y [][]float64) ANN {
 			}
 			updates += 1
 		}
+
+		valGood := 0
+		valTT := 0
+		// test
+		for id := int(float64(len(x)) * TRAIN_RATIO); id < len(x); id++ {
+			prediction := createdNet.compute(x[id])
+			for val:=0; val<len(prediction); val++ {
+				if math.Abs(prediction[val]-y[id][val]) < 0.5 {
+					valGood += 1
+				}
+				valTT += 1
+			}
+		}
 		
 		fin := time.Now()
 		loss = loss / float64(len(x)) / float64(len(y[0]))
-		fmt.Println(it, "loss", loss, "acc", float64(goodClassified)/float64(allClassified), fin.Sub(debut))
+		acc := float64(goodClassified) / float64(allClassified)
+		valAcc := float64(valGood) / float64(valTT)
+		fmt.Println(it, "loss", loss, "acc", acc, fin.Sub(debut), "val_acc", valAcc)
+
+		if loss < TARGET_LOSS || acc > TARGET_ACCURACY {
+			return ANN{inputSize: inputSize, weights: weights, layers: layers}
+		}
 	}
 
 	return ANN{inputSize: inputSize, weights: weights, layers: layers}
@@ -266,6 +289,26 @@ func (net ANN) describe() {
 	fmt.Println("---------------------")
 }
 
+func (net ANN) compute(vect []float64) []float64 {
+	lastInput := vect
+	for layerId:=0; layerId<len(net.layers); layerId++ {
+		layerOutput := make([]float64, net.layers[layerId].units)
+		for layerOutputId:=0; layerOutputId<len(layerOutput); layerOutputId++ {
+			unitValue := 0.0
+			for lastInputId:=0; lastInputId<len(lastInput); lastInputId++ {
+				unitValue += lastInput[lastInputId] * net.weights[layerId][layerOutputId][lastInputId]
+			}
+			if net.layers[layerId].useBias {
+				unitValue += net.weights[layerId][layerOutputId][len(lastInput)]
+			}
+			layerOutput[layerOutputId] = unitValue
+		}
+		layerOutput = activation(net.layers[layerId].activation, layerOutput)
+		lastInput = layerOutput
+	}
+	return lastInput
+}
+
 type ANN struct {
 	inputSize int
 	weights [][][]float64
@@ -289,8 +332,7 @@ func main() {
 	x := getDataX()
 	y := getDataY()
 	shuffle(x, y)
-	layer1 := Layer{units: 5, activation: "relu", useBias: true}
-	//layer2 := Layer{units: 15, activation: "relu", useBias: true}
+	layer1 := Layer{units: 10, activation: "relu", useBias: true}
 	layer3 := Layer{units: 2, activation: "softmax", useBias: true}
 	net := trainAnn(10, []Layer{layer1, layer3}, x, y)
 	net.describe()
