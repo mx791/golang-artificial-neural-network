@@ -1,6 +1,5 @@
 package main
 
-
 import (
 	"fmt"
 	"math/rand"
@@ -12,14 +11,18 @@ import (
 func getDataX() [][]float64 {
 	data := make([][]float64, 200)
 	for i := 0; i<100; i++ {
-		data[i] = make([]float64, 2)
-		data[i][0] = rand.Float64() * 0.5
-		data[i][1] = rand.Float64() * 0.5
+		data[i] = make([]float64, 10)
+		start := rand.Float64()
+		for e:=0; e<10; e++ {
+			data[i][e] = start + rand.Float64()*0.2 + float64(e)*0.02
+		}
 	}
 	for i := 100; i<200; i++ {
-		data[i] = make([]float64, 2)
-		data[i][0] = rand.Float64() * 2
-		data[i][1] = rand.Float64() * 2
+		data[i] = make([]float64, 10)
+		start := rand.Float64()
+		for e:=0; e<10; e++ {
+			data[i][e] = start + rand.Float64()*0.2 - float64(e)*0.02
+		}
 	}
 	return data
 }
@@ -39,29 +42,29 @@ func getDataY() [][]float64 {
 	return data
 }
 
+func ternary(condition bool, value1 float64, value2 float64) float64 {
+	if condition {
+		return value1
+	}
+	return value2
+}
+
 type Layer struct {
 	units int
 	activation string
 	useBias bool
 }
 
+// génère une liste de matrice de poids par rapport aux spec des layers
 func builLayers(inputSize int, layers []Layer, useRandom bool, baseValue float64) [][][]float64 {
 	weights := make([][][]float64, len(layers))
 	lastSize := inputSize
 	for layer:=0; layer<len(layers); layer++ {
 		weights[layer] = make([][]float64, layers[layer].units)
 		for out:=0; out<layers[layer].units; out++ {
-			if layers[layer].useBias {
-				weights[layer][out] = make([]float64, lastSize + 1)
-			} else {
-				weights[layer][out] = make([]float64, lastSize)
-			}
+			weights[layer][out] = make([]float64, int(ternary(layers[layer].useBias, float64(lastSize + 1), float64(lastSize))))
 			for value:=0; value<len(weights[layer][out]); value++ {
-				if useRandom {
-					weights[layer][out][value] = 0.5 - rand.Float64()
-				} else {
-					weights[layer][out][value] = baseValue
-				}
+				weights[layer][out][value] = ternary(useRandom, 0.5 - rand.Float64(), baseValue)
 			}
 		}
 		lastSize = layers[layer].units
@@ -69,40 +72,55 @@ func builLayers(inputSize int, layers []Layer, useRandom bool, baseValue float64
 	return weights
 }
 
+// fonction d'activation
 func activation(name string, values []float64) []float64 {
 	ret := make([]float64, len(values))
+	sum := 0.0
+	if name == "softmax" {
+		for i:=0; i<len(values); i++ {
+			sum += math.Exp(values[i])
+		}
+	}
 	for i:=0; i<len(values); i++ {
 		if name == "sigmoid" {
 			ret[i] = 1.0 / (1.0 + math.Exp(-values[i]))
+		} else if name == "softmax" {
+			ret[i] = math.Exp(values[i]) / sum
 		} else if name == "relu" {
-			if values[i] > 0.0 {
-				ret[i] = values[i]
-			} else {
-				ret[i] = 0.05 * values[i]
-			}
+			ret[i] = ternary(values[i] > 0.0, values[i], values[i]*0.05)
+		} else {
+			ret[i] = values[i]
 		}
 	}
 	return ret
 }
 
+// dérivé de la fonction d'activation
 func dactivation(name string, values []float64) []float64 {
 	ret := make([]float64, len(values))
+	sum := 0.0
+	if name == "softmax" {
+		for i:=0; i<len(values); i++ {
+			sum += math.Exp(values[i])
+		}
+	}
 	for i:=0; i<len(values); i++ {
 		if name == "sigmoid" {
 			ret[i] = values[i] * (1.0 - values[i])
 		} else if name == "relu" {
-			if values[i] > 0.0 {
-				ret[i] = 1.0
-			} else {
-				ret[i] = 0.05
-			}
+			ret[i] = ternary(values[i] > 0.0, 1.0, 0.0)
+		} else if name == "softmax" {
+			ret[i] = 1.0 / sum
+		} else {
+			ret[i] = values[i]
 		}
 	}
 	return ret
 }
 
+// cliping de gradient pour l'empêcher de dépasser un certain seuil
 func controlGradient(value float64) float64 {
-	CLIPING_THRESOLD := 1.0
+	CLIPING_THRESOLD := 0.5
 	if math.Abs(value) > CLIPING_THRESOLD {
 		return value / math.Abs(value)
 	}
@@ -115,6 +133,7 @@ var loss = 0.0
 var goodClassified = 0
 var allClassified = 0
 
+// forward + backward pour une ligne du dataset
 func threadIter(x []float64, y []float64, weights [][][]float64, gradient [][][]float64, layers []Layer) {
 	defer wg.Done()
 	layersValues := make([][]float64, len(layers) + 1)
@@ -169,7 +188,7 @@ func threadIter(x []float64, y []float64, weights [][][]float64, gradient [][][]
 }
 
 // constantes d'entrainement
-var ITERS = 35
+var ITERS = 300
 var LEARN_RATE = 0.1
 var BATCH_SIZE = 10
 
@@ -204,15 +223,13 @@ func trainAnn(inputSize int, layers []Layer, x [][]float64, y [][]float64) ANN {
 			for i:=0; i<len(weights); i++ {
 				for e:=0; e<len(weights[i]); e++ {
 					for a:=0; a<len(weights[i][e]); a++ {
-						mouvingAvg[i][e][a] = mouvingAvg[i][e][a]*b1 + (1.0 - b1)*gradient[i][e][a]
-						squaredMouvingAvg[i][e][a] = squaredMouvingAvg[i][e][a] * b2 + (1.0 - b2) * gradient[i][e][a] * gradient[i][e][a]
+						grad := gradient[i][e][a] / float64(BATCH_SIZE)
 						mChap := mouvingAvg[i][e][a] / (1.0 - math.Pow(b1, float64(updates)))
 						vChap := math.Sqrt(squaredMouvingAvg[i][e][a] / (1.0 - math.Pow(b2, float64(updates)))) + eps
-						admaRate := mChap / vChap * LEARN_RATE
-						if updates == 0 {
-							admaRate = 1.0
-						}
-						weights[i][e][a] += controlGradient(gradient[i][e][a] * math.Abs(admaRate))
+						admaRate := ternary(updates >= 1, mChap / vChap * LEARN_RATE, 0.0)
+						mouvingAvg[i][e][a] = mouvingAvg[i][e][a]*b1 + (1.0 - b1)*grad
+						squaredMouvingAvg[i][e][a] = squaredMouvingAvg[i][e][a] * b2 + (1.0 - b2) * math.Pow(grad, 2.0)
+						weights[i][e][a] += controlGradient(grad * math.Abs(admaRate))
 						gradient[i][e][a] = 0.0
 					}
 				}
@@ -228,6 +245,7 @@ func trainAnn(inputSize int, layers []Layer, x [][]float64, y [][]float64) ANN {
 	return ANN{inputSize: inputSize, weights: weights, layers: layers}
 }
 
+// affiche à l'utilisateur des informations sur le modèles
 func (net ANN) describe() {
 	fmt.Println("---------------------")
 	fmt.Println("Description du modèle")
@@ -254,10 +272,26 @@ type ANN struct {
 	layers []Layer
 }
 
+// réarange aléatoirement un dataset
+func shuffle(x [][]float64, y [][]float64) {
+	for i:=0; i<len(x); i++ {
+		newId := rand.Intn(len(x))
+		xTmp := x[newId]
+		yTmp := y[newId]
+		x[newId] = x[i]
+		y[newId] = y[i]
+		x[i] = xTmp
+		y[i] = yTmp
+	}
+}
+
 func main() {
-	layer1 := Layer{units: 15, activation: "sigmoid", useBias: true}
-	layer2 := Layer{units: 5, activation: "sigmoid", useBias: true}
-	layer3 := Layer{units: 2, activation: "sigmoid", useBias: true}
-	net := trainAnn(2, []Layer{layer1, layer2, layer3}, getDataX(), getDataY())
+	x := getDataX()
+	y := getDataY()
+	shuffle(x, y)
+	layer1 := Layer{units: 5, activation: "relu", useBias: true}
+	//layer2 := Layer{units: 15, activation: "relu", useBias: true}
+	layer3 := Layer{units: 2, activation: "softmax", useBias: true}
+	net := trainAnn(10, []Layer{layer1, layer3}, x, y)
 	net.describe()
 }
