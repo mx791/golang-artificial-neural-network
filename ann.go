@@ -226,7 +226,7 @@ func trainAnn(inputSize int, layers []Layer, x [][]float64, y [][]float64) ANN {
 						grad := gradient[i][e][a] / float64(BATCH_SIZE)
 						mChap := mouvingAvg[i][e][a] / (1.0 - math.Pow(b1, float64(updates)))
 						vChap := math.Sqrt(squaredMouvingAvg[i][e][a] / (1.0 - math.Pow(b2, float64(updates)))) + eps
-						admaRate := ternary(updates >= 1, mChap / vChap * LEARN_RATE, 0.0)
+						admaRate := ternary(updates >= 1, mChap / vChap * LEARN_RATE, 1.0)
 						mouvingAvg[i][e][a] = mouvingAvg[i][e][a]*b1 + (1.0 - b1)*grad
 						squaredMouvingAvg[i][e][a] = squaredMouvingAvg[i][e][a] * b2 + (1.0 - b2) * math.Pow(grad, 2.0)
 						weights[i][e][a] += controlGradient(grad * math.Abs(admaRate))
